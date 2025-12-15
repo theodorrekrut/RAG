@@ -75,7 +75,7 @@ Frage:
 def chat_completion(prompt: str):
     """Generate chat completion using Ollama with r1 model."""
     if USE_MOCK:
-        return {"choices": [{"message": {"content": f"[MOCK] Antwort zu deiner Frage: {question}"}}]}
+        return {"choices": [{"message": {"content": f"[MOCK] Response to your query"}}]}
     try:
         response = ollama_client.chat(
             model=CHAT_MODEL,
