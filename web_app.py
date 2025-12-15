@@ -1,6 +1,7 @@
 """
 Flask web interface for the RAG system.
 Provides a chat interface and PDF ingestion capabilities.
+Uses Ollama for local LLM operations.
 """
 import os
 import uuid
@@ -11,6 +12,7 @@ from flask import Flask, render_template, request, jsonify, send_from_directory
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
+import ollama
 
 # Load environment variables
 load_dotenv()
@@ -20,7 +22,9 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.getenv("PDF_FOLDER", "pdfs")
 
 # Configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+EMBEDDING_MODEL = "nomic-embed-text"
+CHAT_MODEL = "r1"
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION = "docs"
 CHUNK_SIZE = 500
@@ -28,8 +32,8 @@ BATCH_SIZE = 16
 MAX_UPSERT = 500
 USE_MOCK = os.getenv("USE_MOCK", "0").lower() in ("1", "true", "yes")
 
-API_BASE = "https://api.openai.com/v1"
-HEADERS = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+# Initialize Ollama client
+ollama_client = ollama.Client(host=OLLAMA_HOST)
 
 # Ensure upload folder exists
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -44,8 +48,8 @@ def check_qdrant_connection():
         return False
 
 
-def ensure_collection(url: str, collection: str, size: int = 1536, distance: str = "Cosine"):
-    """Ensure that the collection exists in Qdrant."""
+def ensure_collection(url: str, collection: str, size: int = 768, distance: str = "Cosine"):
+    """Ensure that the collection exists in Qdrant. nomic-embed-text uses 768 dimensions."""
     try:
         r = requests.get(f"{url}/collections", timeout=10)
         if r.ok:
@@ -75,8 +79,8 @@ def ensure_collection(url: str, collection: str, size: int = 1536, distance: str
     return False
 
 
-def embed_batch(texts: list, max_retries: int = 5):
-    """Call OpenAI embeddings API with a batch of texts and retry on 429/5xx."""
+def embed_batch(texts: list, max_retries: int = 3):
+    """Generate embeddings using Ollama with nomic-embed-text model."""
     if USE_MOCK:
         from hashlib import sha256
         vecs = []
@@ -85,34 +89,22 @@ def embed_batch(texts: list, max_retries: int = 5):
             seed = int.from_bytes(h[:8], "big")
             import random as _random
             rnd = _random.Random(seed)
-            vec = [rnd.uniform(-1, 1) for _ in range(1536)]
+            vec = [rnd.uniform(-1, 1) for _ in range(768)]  # nomic-embed-text uses 768 dimensions
             vecs.append(vec)
         return vecs
     
     for attempt in range(max_retries):
         try:
-            resp = requests.post(
-                f"{API_BASE}/embeddings",
-                headers=HEADERS,
-                json={"model": "text-embedding-3-small", "input": texts},
-                timeout=60,
-            )
-            if resp.status_code == 429 or 500 <= resp.status_code < 600:
-                raise requests.exceptions.HTTPError(resp.text, response=resp)
-            resp.raise_for_status()
-            data = resp.json()
-            return [d["embedding"] for d in data["data"]]
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code == 429:
+            # Ollama embed supports batch processing
+            response = ollama_client.embed(model=EMBEDDING_MODEL, input=texts)
+            return response['embeddings']
+        except Exception as e:
+            if attempt < max_retries - 1:
                 wait = (2 ** attempt) + random.random()
+                print(f"[warning] Ollama embedding failed (attempt {attempt+1}): {e}. Retrying in {wait:.1f}s...")
                 time.sleep(wait)
                 continue
-            if e.response is not None and 500 <= e.response.status_code < 600:
-                wait = (2 ** attempt) + random.random()
-                time.sleep(wait)
-                continue
-            raise
-    raise RuntimeError("Failed to get embeddings after retries")
+            raise RuntimeError(f"Failed to get embeddings after {max_retries} retries: {e}") from e
 
 
 def embed(text: str):
@@ -130,22 +122,24 @@ def pdf_to_text(path):
 
 
 def chat_completion(prompt: str):
-    """Get chat completion from OpenAI."""
+    """Generate chat completion using Ollama with r1 model."""
     if USE_MOCK:
         return {"choices": [{"message": {"content": "[MOCK] This is a mock response."}}]}
     try:
-        resp = requests.post(
-            f"{API_BASE}/chat/completions",
-            headers=HEADERS,
-            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}]},
-            timeout=60,
+        response = ollama_client.chat(
+            model=CHAT_MODEL,
+            messages=[{"role": "user", "content": prompt}]
         )
-        resp.raise_for_status()
-        return resp.json()
-    except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 429:
-            raise RuntimeError("OpenAI API rate-limited (429). Try again later or check your API key/quota.")
-        raise
+        # Convert Ollama response format to OpenAI-like format for compatibility
+        return {
+            "choices": [{
+                "message": {
+                    "content": response['message']['content']
+                }
+            }]
+        }
+    except Exception as e:
+        raise RuntimeError(f"Ollama chat completion failed: {e}") from e
 
 
 @app.route('/')
@@ -291,7 +285,17 @@ def upload_pdf():
 def status():
     """Get system status."""
     qdrant_connected = check_qdrant_connection()
-    has_api_key = bool(OPENAI_API_KEY)
+    
+    # Check Ollama connection
+    ollama_connected = False
+    try:
+        # Try to list models to verify Ollama is running
+        ollama_client.list()
+        ollama_connected = True
+    except Exception as e:
+        # Silently fail for status endpoint - Ollama may not be required in mock mode
+        import logging
+        logging.debug(f"Ollama connection check failed: {e}")
     
     # Count documents in collection
     doc_count = 0
@@ -307,16 +311,23 @@ def status():
     
     return jsonify({
         'qdrant_connected': qdrant_connected,
-        'has_api_key': has_api_key,
+        'ollama_connected': ollama_connected,
         'use_mock': USE_MOCK,
-        'document_count': doc_count
+        'document_count': doc_count,
+        'embedding_model': EMBEDDING_MODEL,
+        'chat_model': CHAT_MODEL
     })
 
 
 if __name__ == '__main__':
-    # Check if API key is set
-    if not OPENAI_API_KEY and not USE_MOCK:
-        print("[WARNING] OPENAI_API_KEY not set. Set it in .env file or use USE_MOCK=1")
+    # Check Ollama connection (only in non-mock mode)
+    if not USE_MOCK:
+        try:
+            ollama_client.list()
+            print("[INFO] Ollama connection verified")
+        except Exception as e:
+            print(f"[WARNING] Ollama not available at {OLLAMA_HOST}: {e}")
+            print("[INFO] Make sure Ollama is running: https://ollama.ai")
     
     # Check Qdrant connection
     if not check_qdrant_connection():
@@ -324,8 +335,11 @@ if __name__ == '__main__':
         print("[INFO] Make sure Qdrant is running: docker run -p 6333:6333 qdrant/qdrant")
     
     print("\n" + "="*60)
-    print("RAG Web Interface Starting...")
+    print("RAG Web Interface Starting (Ollama-powered)")
     print("="*60)
+    print(f"Ollama Host: {OLLAMA_HOST}")
+    print(f"Embedding Model: {EMBEDDING_MODEL}")
+    print(f"Chat Model: {CHAT_MODEL}")
     print(f"Qdrant URL: {QDRANT_URL}")
     print(f"Collection: {COLLECTION}")
     print(f"Mock Mode: {USE_MOCK}")
