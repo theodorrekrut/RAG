@@ -3,28 +3,27 @@ import uuid
 import requests
 import time
 import random
-from PyPDF2 import PdfReader  
+from PyPDF2 import PdfReader
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # ------------------- CONFIG -------------------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-PDF_FOLDER = "pdfs"
+PDF_FOLDER = os.getenv("PDF_FOLDER", "pdfs")
 COLLECTION = "docs"
 CHUNK_SIZE = 500
+USE_MOCK = os.getenv("USE_MOCK", "0").lower() in ("1", "true", "yes")
 # ---------------------------------------------
 
-if not OPENAI_API_KEY:
+if not OPENAI_API_KEY and not USE_MOCK:
     raise RuntimeError("OPENAI_API_KEY not set. Export it and retry.")
-
-USE_MOCK = os.getenv("USE_MOCK", "0").lower() in ("1", "true", "yes")
 
 API_BASE = "https://api.openai.com/v1"
 HEADERS = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
 
-QDRANT_URL = os.getenv("QDRANT_URL", "http://192.168.0.241:6333")
-
-
-if not USE_MOCK and not OPENAI_API_KEY:
-    raise RuntimeError("OPENAI_API_KEY not set. Export it and retry.")
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 
 def ensure_collection(url: str, collection: str, size: int = 1536, distance: str = "Cosine"):
     try:
@@ -111,8 +110,28 @@ def pdf_to_text(path):
 
 points = []
 
-ensure_collection(QDRANT_URL, COLLECTION, size=1536, distance="Cosine")
+# Create PDF folder if it doesn't exist
+if not os.path.exists(PDF_FOLDER):
+    os.makedirs(PDF_FOLDER)
+    print(f"[info] Created {PDF_FOLDER} folder. Please add PDF files to ingest.")
 
+# Check if folder has any PDFs
+pdf_files = [f for f in os.listdir(PDF_FOLDER) if f.lower().endswith(".pdf")]
+if not pdf_files:
+    print(f"[warning] No PDF files found in {PDF_FOLDER} folder.")
+    print(f"[info] Add PDF files to the {PDF_FOLDER} folder and run this script again.")
+    exit(0)
+
+# Try to create collection in Qdrant
+try:
+    if not ensure_collection(QDRANT_URL, COLLECTION, size=1536, distance="Cosine"):
+        print(f"[error] Could not create collection '{COLLECTION}' at {QDRANT_URL}")
+        print("[error] Make sure Qdrant is running: docker run -p 6333:6333 qdrant/qdrant")
+        exit(1)
+except Exception as e:
+    print(f"[error] Failed to connect to Qdrant at {QDRANT_URL}: {e}")
+    print("[error] Make sure Qdrant is running: docker run -p 6333:6333 qdrant/qdrant")
+    exit(1)
 
 BATCH_SIZE = 16
 for filename in os.listdir(PDF_FOLDER):

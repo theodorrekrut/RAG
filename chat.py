@@ -1,18 +1,20 @@
 import requests
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 qdrant_available = True
 
-OPENAI_API_KEY = "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"
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 COLLECTION = "docs"
+USE_MOCK = os.getenv("USE_MOCK", "0").lower() in ("1", "true", "yes")
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", OPENAI_API_KEY)
-if not OPENAI_API_KEY:
+if not OPENAI_API_KEY and not USE_MOCK:
     raise RuntimeError(
         "OPENAI_API_KEY not set. Set environment variable OPENAI_API_KEY and retry."
     )
-
-USE_MOCK = os.getenv("USE_MOCK", "0").lower() in ("1", "true", "yes")
 
 API_BASE = "https://api.openai.com/v1"
 HEADERS = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
@@ -28,7 +30,7 @@ def client_embeddings(text: str):
     return resp.json()["data"][0]["embedding"]
 qdrant = None
 if qdrant_available:
-    QDRANT_URL = os.getenv("QDRANT_URL", "http://192.168.0.241:6333/")
+    QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
     try:
         r = requests.get(f"{QDRANT_URL}/collections")
         if r.ok:
