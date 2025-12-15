@@ -9,7 +9,7 @@ A complete RAG (Retrieval Augmented Generation) system with a modern web interfa
 - 📄 **PDF Upload & Ingestion**: Upload PDF documents through the web interface
 - 🔍 **Vector Search**: Uses Qdrant vector database for semantic search
 - 💬 **Chat Interface**: Beautiful web UI for asking questions
-- 🤖 **AI-Powered Answers**: Uses local LLMs via Ollama (deepseek-r1 for reasoning)
+- 🤖 **AI-Powered Answers**: Uses local LLMs via Ollama (r1 for reasoning)
 - 🔐 **100% Local & Private**: All processing happens on your machine
 - 🎯 **Real-time Status**: See system status and document count
 - 🚫 **No API Keys Required**: Everything runs locally
@@ -17,7 +17,7 @@ A complete RAG (Retrieval Augmented Generation) system with a modern web interfa
 ## Architecture
 
 - **Embedding Model**: `nomic-embed-text` (768 dimensions) - for converting text to vectors
-- **Chat Model**: `deepseek-r1` - for reasoning and generating answers
+- **Chat Model**: `r1` - for reasoning and generating answers
 - **Vector Database**: Qdrant - for storing and searching document embeddings
 - **LLM Server**: Ollama - local LLM inference server
 
@@ -37,7 +37,7 @@ Then pull the required models:
 
 ```bash
 ollama pull nomic-embed-text
-ollama pull deepseek-r1
+ollama pull r1
 ```
 
 Verify Ollama is running:
@@ -146,7 +146,7 @@ ollama list
 If models are missing:
 ```bash
 ollama pull nomic-embed-text
-ollama pull deepseek-r1
+ollama pull r1
 ```
 
 ### Qdrant Connection Issues

@@ -24,7 +24,7 @@ app.config['UPLOAD_FOLDER'] = os.getenv("PDF_FOLDER", "pdfs")
 # Configuration
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 EMBEDDING_MODEL = "nomic-embed-text"
-CHAT_MODEL = "deepseek-r1"
+CHAT_MODEL = "r1"
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION = "docs"
 CHUNK_SIZE = 500
@@ -122,7 +122,7 @@ def pdf_to_text(path):
 
 
 def chat_completion(prompt: str):
-    """Generate chat completion using Ollama with deepseek-r1 model."""
+    """Generate chat completion using Ollama with r1 model."""
     if USE_MOCK:
         return {"choices": [{"message": {"content": "[MOCK] This is a mock response."}}]}
     try:
