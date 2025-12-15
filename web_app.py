@@ -292,8 +292,10 @@ def status():
         # Try to list models to verify Ollama is running
         ollama_client.list()
         ollama_connected = True
-    except Exception:
-        pass
+    except Exception as e:
+        # Silently fail for status endpoint - Ollama may not be required in mock mode
+        import logging
+        logging.debug(f"Ollama connection check failed: {e}")
     
     # Count documents in collection
     doc_count = 0
@@ -318,12 +320,11 @@ def status():
 
 
 if __name__ == '__main__':
-    # Check Ollama connection
-    ollama_ok = False
+    # Check Ollama connection (only in non-mock mode)
     if not USE_MOCK:
         try:
             ollama_client.list()
-            ollama_ok = True
+            print("[INFO] Ollama connection verified")
         except Exception as e:
             print(f"[WARNING] Ollama not available at {OLLAMA_HOST}: {e}")
             print("[INFO] Make sure Ollama is running: https://ollama.ai")
