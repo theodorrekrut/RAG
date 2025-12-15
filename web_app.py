@@ -320,11 +320,11 @@ def status():
 if __name__ == '__main__':
     # Check Ollama connection
     ollama_ok = False
-    try:
-        ollama_client.list()
-        ollama_ok = True
-    except Exception as e:
-        if not USE_MOCK:
+    if not USE_MOCK:
+        try:
+            ollama_client.list()
+            ollama_ok = True
+        except Exception as e:
             print(f"[WARNING] Ollama not available at {OLLAMA_HOST}: {e}")
             print("[INFO] Make sure Ollama is running: https://ollama.ai")
     

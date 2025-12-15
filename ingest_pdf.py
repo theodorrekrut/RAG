@@ -107,6 +107,17 @@ if not pdf_files:
     print(f"[info] Add PDF files to the {PDF_FOLDER} folder and run this script again.")
     exit(0)
 
+# Check Ollama connection (skip in mock mode)
+if not USE_MOCK:
+    try:
+        ollama_client.list()
+        print(f"[info] Ollama connection verified at {OLLAMA_HOST}")
+    except Exception as e:
+        print(f"[error] Cannot connect to Ollama at {OLLAMA_HOST}: {e}")
+        print("[error] Make sure Ollama is running: https://ollama.ai")
+        print("[info] Alternatively, use USE_MOCK=1 for testing without Ollama")
+        exit(1)
+
 # Try to create collection in Qdrant (nomic-embed-text uses 768 dimensions)
 try:
     if not ensure_collection(QDRANT_URL, COLLECTION, size=768, distance="Cosine"):
