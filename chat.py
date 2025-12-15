@@ -1,33 +1,27 @@
 import requests
 import os
 from dotenv import load_dotenv
+import ollama
 
 # Load environment variables from .env file
 load_dotenv()
 
 qdrant_available = True
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# Ollama configuration
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+EMBEDDING_MODEL = "nomic-embed-text"
+CHAT_MODEL = "deepseek-r1"
 COLLECTION = "docs"
 USE_MOCK = os.getenv("USE_MOCK", "0").lower() in ("1", "true", "yes")
 
-if not OPENAI_API_KEY and not USE_MOCK:
-    raise RuntimeError(
-        "OPENAI_API_KEY not set. Set environment variable OPENAI_API_KEY and retry."
-    )
-
-API_BASE = "https://api.openai.com/v1"
-HEADERS = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+# Initialize Ollama client
+ollama_client = ollama.Client(host=OLLAMA_HOST)
 
 def client_embeddings(text: str):
-    resp = requests.post(
-        f"{API_BASE}/embeddings",
-        headers=HEADERS,
-        json={"model": "text-embedding-3-small", "input": text},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()["data"][0]["embedding"]
+    """Generate embeddings using Ollama with nomic-embed-text model."""
+    response = ollama_client.embed(model=EMBEDDING_MODEL, input=text)
+    return response['embeddings'][0]
 qdrant = None
 if qdrant_available:
     QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
@@ -79,23 +73,24 @@ Frage:
 """
 
 def chat_completion(prompt: str):
+    """Generate chat completion using Ollama with deepseek-r1 model."""
     if USE_MOCK:
         return {"choices": [{"message": {"content": f"[MOCK] Antwort zu deiner Frage: {question}"}}]}
     try:
-        resp = requests.post(
-            f"{API_BASE}/chat/completions",
-            headers=HEADERS,
-            json={"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}]},
-            timeout=60,
+        response = ollama_client.chat(
+            model=CHAT_MODEL,
+            messages=[{"role": "user", "content": prompt}]
         )
-        resp.raise_for_status()
-        return resp.json()
-    except requests.exceptions.HTTPError as e:
-        if e.response is not None and e.response.status_code == 429:
-            raise RuntimeError(
-                "OpenAI API rate-limited (429). Try again later or check your API key/quota."
-            ) from e
-        raise
+        # Convert Ollama response format to OpenAI-like format for compatibility
+        return {
+            "choices": [{
+                "message": {
+                    "content": response['message']['content']
+                }
+            }]
+        }
+    except Exception as e:
+        raise RuntimeError(f"Ollama chat completion failed: {e}") from e
 
 try:
     resp = chat_completion(prompt)

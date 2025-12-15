@@ -5,27 +5,27 @@ import time
 import random
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
+import ollama
 
 # Load environment variables from .env file
 load_dotenv()
 
 # ------------------- CONFIG -------------------
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+EMBEDDING_MODEL = "nomic-embed-text"
 PDF_FOLDER = os.getenv("PDF_FOLDER", "pdfs")
 COLLECTION = "docs"
 CHUNK_SIZE = 500
 USE_MOCK = os.getenv("USE_MOCK", "0").lower() in ("1", "true", "yes")
 # ---------------------------------------------
 
-if not OPENAI_API_KEY and not USE_MOCK:
-    raise RuntimeError("OPENAI_API_KEY not set. Export it and retry.")
-
-API_BASE = "https://api.openai.com/v1"
-HEADERS = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+# Initialize Ollama client
+ollama_client = ollama.Client(host=OLLAMA_HOST)
 
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 
-def ensure_collection(url: str, collection: str, size: int = 1536, distance: str = "Cosine"):
+def ensure_collection(url: str, collection: str, size: int = 768, distance: str = "Cosine"):
+    """Ensure collection exists in Qdrant. nomic-embed-text uses 768 dimensions."""
     try:
         r = requests.get(f"{url}/collections", timeout=10)
         if r.ok:
@@ -56,47 +56,32 @@ def ensure_collection(url: str, collection: str, size: int = 1536, distance: str
             pass
     raise RuntimeError(f"Could not create collection '{collection}' at {url}")
 
-def embed_batch(texts: list, max_retries: int = 5):
-    """Call OpenAI embeddings API with a batch of texts and retry on 429/5xx."""
+def embed_batch(texts: list, max_retries: int = 3):
+    """Generate embeddings using Ollama with nomic-embed-text model."""
     if USE_MOCK:
-        
         from hashlib import sha256
         vecs = []
         for t in texts:
             h = sha256(t.encode("utf-8") + b"::embed").digest()
-            
             seed = int.from_bytes(h[:8], "big")
             import random as _random
             rnd = _random.Random(seed)
-            vec = [rnd.uniform(-1, 1) for _ in range(1536)]
+            vec = [rnd.uniform(-1, 1) for _ in range(768)]  # nomic-embed-text uses 768 dimensions
             vecs.append(vec)
         return vecs
+    
     for attempt in range(max_retries):
         try:
-            resp = requests.post(
-                f"{API_BASE}/embeddings",
-                headers=HEADERS,
-                json={"model": "text-embedding-3-small", "input": texts},
-                timeout=60,
-            )
-            if resp.status_code == 429 or 500 <= resp.status_code < 600:
-                raise requests.exceptions.HTTPError(resp.text, response=resp)
-            resp.raise_for_status()
-            data = resp.json()
-            return [d["embedding"] for d in data["data"]]
-        except requests.exceptions.HTTPError as e:
-            if e.response is not None and e.response.status_code == 429:
+            # Ollama embed supports batch processing
+            response = ollama_client.embed(model=EMBEDDING_MODEL, input=texts)
+            return response['embeddings']
+        except Exception as e:
+            if attempt < max_retries - 1:
                 wait = (2 ** attempt) + random.random()
-                print(f"[warn] rate limited by OpenAI (429). Backing off {wait:.1f}s (attempt {attempt+1})")
+                print(f"[warn] Ollama embedding failed (attempt {attempt+1}): {e}. Backing off {wait:.1f}s")
                 time.sleep(wait)
                 continue
-            if e.response is not None and 500 <= e.response.status_code < 600:
-                wait = (2 ** attempt) + random.random()
-                print(f"[warn] server error {e.response.status_code}. Backing off {wait:.1f}s (attempt {attempt+1})")
-                time.sleep(wait)
-                continue
-            raise
-    raise RuntimeError("Failed to get embeddings after retries")
+            raise RuntimeError(f"Failed to get embeddings after {max_retries} retries: {e}") from e
 
 def embed(text: str):
     return embed_batch([text])[0]
@@ -122,9 +107,9 @@ if not pdf_files:
     print(f"[info] Add PDF files to the {PDF_FOLDER} folder and run this script again.")
     exit(0)
 
-# Try to create collection in Qdrant
+# Try to create collection in Qdrant (nomic-embed-text uses 768 dimensions)
 try:
-    if not ensure_collection(QDRANT_URL, COLLECTION, size=1536, distance="Cosine"):
+    if not ensure_collection(QDRANT_URL, COLLECTION, size=768, distance="Cosine"):
         print(f"[error] Could not create collection '{COLLECTION}' at {QDRANT_URL}")
         print("[error] Make sure Qdrant is running: docker run -p 6333:6333 qdrant/qdrant")
         exit(1)
