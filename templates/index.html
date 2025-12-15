@@ -410,6 +410,13 @@
     <script>
         let questionCount = 0;
         
+        // Helper function to escape HTML and prevent XSS
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
         // Update status on load
         async function updateStatus() {
             try {
@@ -532,10 +539,20 @@
             const label = role === 'user' ? '❓ You' : '💡 Assistant';
             const contextBadge = hasContext ? '<span class="context-badge">✓ Context Used</span>' : '';
             
-            messageDiv.innerHTML = `
-                <div class="message-label">${label}${contextBadge}</div>
-                <div class="message-content">${content.replace(/\n/g, '<br>')}</div>
-            `;
+            // Create elements safely to prevent XSS
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'message-label';
+            labelDiv.textContent = label;
+            if (contextBadge) {
+                labelDiv.innerHTML += contextBadge;
+            }
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.innerHTML = escapeHtml(content).replace(/\n/g, '<br>');
+            
+            messageDiv.appendChild(labelDiv);
+            messageDiv.appendChild(contentDiv);
             
             messagesDiv.appendChild(messageDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;

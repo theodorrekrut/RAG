@@ -24,6 +24,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 COLLECTION = "docs"
 CHUNK_SIZE = 500
+BATCH_SIZE = 16
+MAX_UPSERT = 500
 USE_MOCK = os.getenv("USE_MOCK", "0").lower() in ("1", "true", "yes")
 
 API_BASE = "https://api.openai.com/v1"
@@ -179,7 +181,7 @@ def chat():
                     hits = result.get("result") or result.get("data") or []
                     texts = []
                     for h in hits:
-                        payload = h.get("payload") or h.get("payload", {})
+                        payload = h.get("payload", {})
                         if isinstance(payload, dict) and "text" in payload:
                             texts.append(payload["text"])
                     context = "\n".join(texts)
@@ -243,7 +245,6 @@ def upload_pdf():
         
         # Process chunks in batches
         points = []
-        BATCH_SIZE = 16
         for i in range(0, len(chunks), BATCH_SIZE):
             batch_chunks = chunks[i:i+BATCH_SIZE]
             try:
@@ -262,7 +263,6 @@ def upload_pdf():
                 })
         
         # Upsert to Qdrant
-        MAX_UPSERT = 500
         total_upserted = 0
         for i in range(0, len(points), MAX_UPSERT):
             sub = {"points": points[i:i+MAX_UPSERT]}
@@ -331,4 +331,9 @@ if __name__ == '__main__':
     print(f"Mock Mode: {USE_MOCK}")
     print("="*60 + "\n")
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Only enable debug mode in development (via environment variable)
+    debug_mode = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true", "yes")
+    if debug_mode:
+        print("[WARNING] Running in DEBUG mode. Do not use in production!")
+    
+    app.run(debug=debug_mode, host='0.0.0.0', port=5000)

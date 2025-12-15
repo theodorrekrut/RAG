@@ -25,12 +25,24 @@ if [ ! -d pdfs ]; then
 fi
 
 # Check if Python dependencies are installed
-if ! python3 -c "import flask" 2>/dev/null; then
+echo "📦 Checking dependencies..."
+MISSING_DEPS=0
+for dep in flask requests PyPDF2 dotenv; do
+    if ! python3 -c "import $dep" 2>/dev/null; then
+        MISSING_DEPS=1
+        break
+    fi
+done
+
+if [ $MISSING_DEPS -eq 1 ]; then
+    echo "⚠️  Missing dependencies detected"
     echo "📦 Installing dependencies..."
     pip install -r requirements.txt
     echo "✅ Dependencies installed"
-    echo ""
+else
+    echo "✅ All dependencies are installed"
 fi
+echo ""
 
 # Check if Qdrant is accessible
 echo "🔍 Checking Qdrant connection..."
